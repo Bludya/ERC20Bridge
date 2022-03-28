@@ -1,7 +1,7 @@
 {
-  "name": "academyproject",
+  "name": "erc20bridge",
   "version": "1.0.0",
-  "description": "Lime academy smart contract project",
+  "description": "Lime academy smart contract project - an ERC20 bridge",
   "main": "index.js",
   "scripts": {
     "test": "test"

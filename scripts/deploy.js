@@ -1,26 +1,37 @@
+
 const hre = require('hardhat')
 const ethers = hre.ethers;
 
-async function deployElectionContract() {
-    await hre.run('compile'); // We are compiling the contracts using subtask
-    const [deployer] = await ethers.getSigners(); // We are getting the deployer
-  
-    console.log('Deploying contracts with the account:', deployer.address); // We are printing the address of the deployer
-    console.log('Account balance:', (await deployer.getBalance()).toString()); // We are printing the account balance
+async function deployValCoin(wallet) {
+  let ERC20;
 
-    const USElection = await ethers.getContractFactory("USElection"); // 
-    const usElectionContract = await USElection.deploy();
-    console.log('Waiting for USElection deployment...');
-    await usElectionContract.deployed();
+  if (wallet == null) {
+    ERC20 = await hre.ethers.getContractFactory("ValCoin");
+  } else {
+    ERC20 = await hre.ethers.getContractFactory("ValCoin", wallet);
+  }
 
-    console.log('USElection Contract address: ', usElectionContract.address);
-    console.log('Done!');
-    await hre.run("verify:verify", {
-        address: usElectionContract.address,
-        constructorArguments: [
-         // if any
-        ],
-      });
+  const valCoin = await ERC20.deploy();
+  await valCoin.deployed();
+  console.log("ValCoin deployed to:", valCoin.address);
+
+  return valCoin.address;
 }
+
+async function deployERC20BridgeContract(coinAddr, wallet) {
+  let ERC20Bridge;
+
+  if (wallet == null) {
+    ERC20Bridge = await hre.ethers.getContractFactory("ERC20Bridge");
+  } else {
+    ERC20Bridge = await hre.ethers.getContractFactory("ERC20Bridge", wallet);
+  }
   
-module.exports = deployElectionContract;
+  const bridge = await ERC20Bridge.deploy(coinAddr);
+  await bridge.deployed();
+  console.log("Bridge deployed to:", bridge.address);
+
+  return bridge;
+}
+
+module.exports = {deployValCoin, deployERC20BridgeContract};

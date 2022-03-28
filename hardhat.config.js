@@ -1,38 +1,34 @@
 require("@nomiclabs/hardhat-waffle");
 require("solidity-coverage");
 require("@nomiclabs/hardhat-etherscan");
+let env = require("./secrets.json");
 
-// This is a sample Hardhat task. To learn how to create your own go to
-// https://hardhat.org/guides/create-task.html
-task("accounts", "Prints the list of accounts", async (taskArgs, hre) => {
-  const accounts = await hre.ethers.getSigners();
-
-  for (const account of accounts) {
-    console.log(account.address);
-  }
-});
-
-task("deploy-testnets", "Deploys contract on a provided network")
+task("deploy-local", "Deploys VAL coin and bridge contract locally")
     .setAction(async () => {
-        const deployElectionContract = require("./scripts/deploy");
-        await deployElectionContract();
+    const {deployValCoin, deployERC20BridgeContract} = require("./scripts/deploy");
+    await hre.run('compile'); // We are compiling the contracts using subtask
+    
+    const valCoinAddr = await deployValCoin();
+    await deployERC20BridgeContract(valCoinAddr);
 });
 
-task("deploy-mainnet", "Deploys contract on a provided network")
-  .addParam("privateKey", "Please provide the private key")
-  .setAction(async ({privateKey}) => {
-    const deployElectionContract = require("./scripts/deploy-with-param");
-    await deployElectionContract(privateKey);
-});
+task("deploy", "Deploys VAL coin and bridge contract on a provided network")
+  .setAction(async () => {
+    const {deployValCoin, deployERC20BridgeContract} = require("./scripts/deploy");
+    await hre.run('compile'); // We are compiling the contracts using subtask
 
-subtask("print", "Prints a message")
-  .addParam("message", "The message to print")
-  .setAction(async (taskArgs) => {
-    console.log(taskArgs.message);
-});
+    const valCoinAddr = await deployValCoin();
+    const bridgeContract = await deployERC20BridgeContract(valCoinAddr);
 
-// You need to export an object to set up your config
-// Go to https://hardhat.org/config/ to learn more
+    await bridgeContract.deployTransaction.wait(5);
+
+    await hre.run("verify:verify", {
+      address: bridgeContract.address,
+      constructorArguments: [
+        valCoinAddr
+      ],
+    });
+});
 
 /**
  * @type import('hardhat/config').HardhatUserConfig
@@ -47,13 +43,13 @@ module.exports = {
   },
   networks: {
     rinkeby: {
-      url: "https://rinkeby.infura.io/v3/14c2981e947d46b79c76709a84cda8b2",
-      accounts: ['711531b5e21921f66b7a6f7483d755f1c23abfb24b8faf9b6770a179a9a49562'],
+      url: env.rinkebyUrl,
+      accounts: env.privateKeys,
     }
   },
   etherscan: {
     // Your API key for Etherscan
     // Obtain one at https://etherscan.io/
-    apiKey: "CHIRAADNUI814XIT9ST36R63UFNBNDKBDY"
+    apiKey: env.etherscanApi,
   }
 };
