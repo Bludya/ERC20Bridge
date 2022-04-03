@@ -1,11 +1,13 @@
 import * as React from 'react';
 import styled from 'styled-components';
-// import {
-//   US_ELECTION_ADDRESS
-// } from './constants';
-// import { getContract } from './helpers/ethers';
-// import US_ELECTION from './constants/abis/USElection.json'
+import { getContract } from './helpers/ethers';
+import {
+  REACT_APP_BRIDGE_ADDRESS_RINKEBY,
+  REACT_APP_BRIDGE_ADDRESS_ROPSTEN
+} from './constants/contracts';
+import Bridge from './constants/abis/ERC20Bridge.json'
 import Web3Modal from 'web3modal';
+import web3 from 'web3';
 // @ts-ignore
 import WalletConnectProvider from '@walletconnect/web3-provider';
 import Column from './components/Column';
@@ -21,6 +23,10 @@ import Select from '@material-ui/core/Select';
 import InputLabel  from '@material-ui/core/InputLabel';
 import FormControl from '@material-ui/core/FormControl';
 import MenuItem  from '@material-ui/core/MenuItem';
+import ERC20 from "erc-20-abi";
+
+const ROPSTEN_CHAIN_ID = 3
+const RINKEBY_CHAIN_ID = 4
 
 const SLayout = styled.div`
   position: relative;
@@ -57,6 +63,11 @@ const SBalances = styled(SLanding)`
   }
 `;
 
+interface ICoin {
+  address: string,
+  symbol: string,
+}
+
 interface IAppState {
   fetching: boolean;
   address: string;
@@ -64,8 +75,9 @@ interface IAppState {
   connected: boolean;
   chainId: number;
   pendingRequest: boolean;
-  networkSelected: string;
-  coinSelected: string;
+  networkSelected: number;
+  coinSelected: number;
+  coins: ICoin[];
 }
 
 const INITIAL_STATE: IAppState = {
@@ -75,8 +87,9 @@ const INITIAL_STATE: IAppState = {
   connected: false,
   chainId: 1,
   pendingRequest: false,
-  networkSelected: '',
-  coinSelected: '',
+  networkSelected: 4,
+  coinSelected: 0,
+  coins: [],
 };
 
 class App extends React.Component<any, any> {
@@ -105,6 +118,17 @@ class App extends React.Component<any, any> {
   }
 
   public onConnect = async () => {
+    if (window.ethereum.networkVersion !== this.state.networkSelected) {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: web3.utils.toHex(this.state.networkSelected) }],
+        });
+      } catch (err) {
+        console.log(err);
+      }
+    }
+
     this.provider = await this.web3Modal.connect();
 
     const library = new Web3Provider(this.provider);
@@ -113,24 +137,25 @@ class App extends React.Component<any, any> {
 
     const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
 
+    const bridgeAddress = this.state.chainId === RINKEBY_CHAIN_ID ? REACT_APP_BRIDGE_ADDRESS_RINKEBY : REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
+    const bridgeContract = getContract(bridgeAddress, Bridge.abi, library, address);
+    const availableCoins: string[] = await bridgeContract.getAvailableCoins();
+
+    const coins: ICoin[] = [];
+    for (const coinAddr of availableCoins) {
+      const coinContract = getContract(coinAddr, ERC20, library, address);
+      coins.push({address: coinAddr, symbol: await coinContract.symbol()});
+    }
+
     await this.setState({
       library,
       chainId: network.chainId,
       address,
-      connected: true
+      connected: true,
+      coins,
     });
 
     await this.subscribeToProviderEvents(this.provider);
-
-    // const bridgeAddress = this.state.chainId === 1 ? process.env.REACT_APP_NODE_URL_0! : process.env.REACT_APP_NODE_URL_1!;
-    // const bridgeContract = getContract(bridgeAddress, US_ELECTION.abi, library, address);
-
-    await this.setState({
-      library,
-      chainId: network.chainId,
-      address,
-      connected: true
-    });
   };
 
   // public submitElectionResult = async () => {
@@ -192,7 +217,7 @@ class App extends React.Component<any, any> {
     const library = new Web3Provider(this.provider);
     const network = await library.getNetwork();
     const chainId = network.chainId;
-    await this.setState({ chainId, library });
+    this.setState({ chainId, library });
   }
   
   public close = async () => {
@@ -222,14 +247,27 @@ class App extends React.Component<any, any> {
     this.setState({ ...INITIAL_STATE });
 
   };
+ 
+  public onChangeSelectedNetwork = async (networkSelected: any) => {
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: web3.utils.toHex(networkSelected)}],
+        });
+        this.setState({networkSelected})
+      } catch (err) {
+        console.log(err);
+      }
+  }
 
   public render = () => {
     const {
       address,
       connected,
       chainId,
-      fetching,
-      coinSelected
+      coins,
+      coinSelected,
+      fetching
     } = this.state;
     return (
       <SLayout>
@@ -249,30 +287,31 @@ class App extends React.Component<any, any> {
                   id="demo-simple-select"
                   value={this.state.networkSelected}
                   label="Age"
-                  onChange={(event) => this.setState({networkSelected: event.target.value})}
+                  
+                  defaultValue={RINKEBY_CHAIN_ID}
+                  onChange={(event) => this.onChangeSelectedNetwork(event.target.value)}
                 >
-                  <MenuItem value={1}>Rinkeby</MenuItem>
-                  <MenuItem value={2}>Ropsten</MenuItem>
+                  <MenuItem value={`${ROPSTEN_CHAIN_ID}`}>Ropsten</MenuItem>
+                  <MenuItem value={`${RINKEBY_CHAIN_ID}`}>Rinkeby</MenuItem>
                 </Select>
               </FormControl>
-              <FormControl >
+              { connected &&
+              <>
+              { coins.length > 0 &&<FormControl >
                 <InputLabel id="demo-simple-select-label">Coin</InputLabel>
                 <Select
                   labelId="demo-simple-select-label"
                   id="demo-simple-select"
-                  value={this.state.networkSelected}
+                  value={this.state.coinSelected}
                   label="Age"
-                  onChange={(event) => this.setState({networkSelected: event.target.value})}
+                  onChange={(event) => this.setState({coinSelected: Number(event.target.value)})}
                 >
-                  {coins.array.forEach(coin, i => {
-                    <MenuItem value={1}>coin</MenuItem>
-                  })}
+                 {coins.map((coin, i) => <MenuItem key={i} value={i}>{coin.symbol}</MenuItem>)} 
                 </Select>
               </FormControl>
-              <Button disabled={connected && coinSelected !== ''} >Bridge</Button>
-
-    
-              <Button disabled={true} >Claim</Button>
+              }
+              {coinSelected !== -1 && <Button >Bridge</Button>}
+              </>}
             </Column>
             {fetching ? (
               <Column center>
@@ -282,7 +321,7 @@ class App extends React.Component<any, any> {
               </Column>
             ) : (
                 <SLanding center>
-                  {!this.state.connected && <ConnectButton onClick={this.onConnect} />}
+                  {!this.state.connected && this.state.networkSelected !== 0 && <ConnectButton onClick={this.onConnect} />}
                 </SLanding>
               )}
           </SContent>

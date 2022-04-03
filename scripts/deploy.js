@@ -27,10 +27,11 @@ async function deployERC20BridgeContract(coinAddr, wallet) {
     ERC20Bridge = await hre.ethers.getContractFactory("ERC20Bridge", wallet);
   }
   
-  const bridge = await ERC20Bridge.deploy(coinAddr);
+  const bridge = await ERC20Bridge.deploy();
   await bridge.deployed();
   console.log("Bridge deployed to:", bridge.address);
-
+  await bridge.addCoin(coinAddr);
+  console.log("Coin added to bridge");
   return bridge;
 }
 
