@@ -12,6 +12,7 @@ interface IColumnProps extends IColumnStyleProps {
   children: React.ReactNode
 }
 
+
 const SColumn = styled.div<IColumnStyleProps>`
   position: relative;
   width: 100%;

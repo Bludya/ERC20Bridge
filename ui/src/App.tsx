@@ -1,13 +1,10 @@
 import * as React from 'react';
 import styled from 'styled-components';
 import { getContract } from './helpers/ethers';
-import {
-  REACT_APP_BRIDGE_ADDRESS_RINKEBY,
-  REACT_APP_BRIDGE_ADDRESS_ROPSTEN
-} from './constants/contracts';
 import Bridge from './constants/abis/ERC20Bridge.json'
 import Web3Modal from 'web3modal';
 import web3 from 'web3';
+import crypto from 'crypto';
 // @ts-ignore
 import WalletConnectProvider from '@walletconnect/web3-provider';
 import Column from './components/Column';
@@ -18,15 +15,17 @@ import ConnectButton from './components/ConnectButton';
 
 import { Web3Provider } from '@ethersproject/providers';
 import { getChainData } from './helpers/utilities';
-import Button from './components/Button';
-import Select from '@material-ui/core/Select';
-import InputLabel  from '@material-ui/core/InputLabel';
-import FormControl from '@material-ui/core/FormControl';
-import MenuItem  from '@material-ui/core/MenuItem';
 import ERC20 from "erc-20-abi";
+import { ethers } from 'ethers';
+import BridgeForm, { ICoin } from './components/BridgeForm';
+import constants from './constants/constants';
+import RefundForm, { IBridgeLock } from './components/RefundForm';
+import ReleaseForm from './components/ReleaseForm';
+import Button from './components/Button';
 
-const ROPSTEN_CHAIN_ID = 3
-const RINKEBY_CHAIN_ID = 4
+const Message = styled.h2`
+  color: blue;
+`
 
 const SLayout = styled.div`
   position: relative;
@@ -39,6 +38,8 @@ const SContent = styled(Wrapper)`
   width: 100%;
   height: 100%;
   padding: 0 16px;
+  display: flex;
+  flex-direction: row;
 `;
 
 const SContainer = styled.div`
@@ -55,6 +56,10 @@ const SLanding = styled(Column)`
   height: 600px;
 `;
 
+const SColumn = styled(Column)`
+  width: 33%;
+`;
+
 // @ts-ignore
 const SBalances = styled(SLanding)`
   height: 100%;
@@ -63,33 +68,50 @@ const SBalances = styled(SLanding)`
   }
 `;
 
-interface ICoin {
-  address: string,
-  symbol: string,
-}
-
 interface IAppState {
   fetching: boolean;
+  message: string;
   address: string;
   library: any;
   connected: boolean;
   chainId: number;
   pendingRequest: boolean;
-  networkSelected: number;
-  coinSelected: number;
+  networkSelected: string;
+  coinSelected: string;
+  coinBalance: number;
+  coinAmount: string;
   coins: ICoin[];
+  bridgeSecret: string;
+  refundSecret: string;
+  releaseSecret: string;
+  bridgeLocks: IBridgeLock[];
+  selectedBridgeLockId: string;
+  releaseLocks: IBridgeLock[];
+  selectedReleaseLockId: string;
+  releaseAddress: string;
 }
 
 const INITIAL_STATE: IAppState = {
   fetching: false,
+  message: '',
   address: '',
   library: null,
   connected: false,
-  chainId: 1,
+  chainId: 4,
   pendingRequest: false,
-  networkSelected: 4,
-  coinSelected: 0,
+  networkSelected: '4',
+  coinSelected: '',
+  coinBalance: 0,
+  coinAmount: '',
   coins: [],
+  bridgeSecret: '',
+  refundSecret: '',
+  releaseSecret: '',
+  bridgeLocks: [],
+  selectedBridgeLockId: '',
+  releaseLocks: [],
+  selectedReleaseLockId: '',
+  releaseAddress: '',
 };
 
 class App extends React.Component<any, any> {
@@ -109,12 +131,137 @@ class App extends React.Component<any, any> {
       cacheProvider: true,
       providerOptions: this.getProviderOptions()
     });
+    
+    this.eventListener();
   }
 
   public componentDidMount() {
     if (this.web3Modal.cachedProvider) {
       this.onConnect();
     }
+  }
+
+  public sha256 = (x: string) => crypto.createHash('sha256').update(ethers.utils.hexZeroPad(web3.utils.asciiToHex(x, 32), 32)).digest();
+
+  public eventListener = async () => {
+ 
+    const rinkebyProvider = new ethers.providers.InfuraProvider('rinkeby', process.env.REACT_APP_INFURA_ID);
+    const rinkebyWallet = new ethers.Wallet(process.env.REACT_APP_VALIDATOR_PRIV_KEY_RINKEBY || '', rinkebyProvider);
+    const rinkebyBridge = ethers.ContractFactory.getContract(process.env.REACT_APP_BRIDGE_ADDRESS_RINKEBY || '', Bridge.abi, rinkebyWallet);
+
+    const ropstenProvider = new ethers.providers.InfuraProvider('ropsten', process.env.REACT_APP_INFURA_ID);
+    const ropstenWallet = new ethers.Wallet(process.env.REACT_APP_VALIDATOR_PRIV_KEY_ROPSTEN || '', ropstenProvider);
+    const ropstenBridge = ethers.ContractFactory.getContract(process.env.REACT_APP_BRIDGE_ADDRESS_ROPSTEN || '', Bridge.abi, ropstenWallet);
+
+    await this.addListeners(rinkebyBridge, ropstenBridge);
+    await this.addListeners(ropstenBridge, rinkebyBridge);
+  }
+
+  public addListeners(srcBridge: ethers.Contract, destBridge: ethers.Contract) {
+
+    srcBridge.on('CoinBridged', async (bridgeLockId: any) => {
+      this.setState({message: 'Coin bridged, adding a release...'})
+      try {
+        const bridgeLock = await srcBridge.getBridgeLock(bridgeLockId);
+        const wallet = srcBridge.signer;
+        const srcErc20 = ethers.ContractFactory.getContract(bridgeLock.erc20Contract, ERC20, wallet);
+        const symbol = await srcErc20.symbol();
+        const name = await srcErc20.name();
+
+        const bridgeLockState: IBridgeLock = {
+          id: bridgeLockId,
+          amount: web3.utils.fromWei(bridgeLock.amount.toString()).toString(),
+          symbol,
+          open: true
+        }
+
+        this.state.bridgeLocks.push(bridgeLockState);
+
+        this.setState({});
+
+        const destContractExists = await destBridge.destinationExists(bridgeLock.erc20Contract);
+        if(!destContractExists) {
+          this.setState({message: 'Coin does not yet exist on target chain, deploying ERC20...'})
+
+          const deployTx = await destBridge.deployDestErc20(bridgeLock.erc20Contract,'Bridged ' + name, 'B'+ symbol);
+          const deployReceipt = await deployTx.wait();
+          if(deployReceipt.status !== 1){
+            this.showError("Validator dest ERC20 deploy Tx failed.");
+            this.setState({fetching: false});
+            return;
+          }
+        }
+        this.setState({message: 'Adding a release...'})
+
+        const amount = bridgeLock.amount;
+        const addReleaseTx = await destBridge.addRelease(bridgeLockId, bridgeLock.erc20Contract, amount, bridgeLock.hashlock);
+        const addReleaseReceipt = await addReleaseTx.wait();
+        if(addReleaseReceipt.status !== 1){
+          this.showError("Validator add release Tx failed.");
+          this.setState({fetching: false});
+          return;
+        }
+        const releaseLock: IBridgeLock = {
+          id: bridgeLockId,
+          amount,
+          symbol: typeof symbol === 'string' ? symbol : '',
+          open: true,
+        }
+
+        this.state.releaseLocks.push(releaseLock);
+        this.setState({fetching: false});
+      } catch(error){
+        this.showError(error.message);
+        this.setState({fetching: false});
+      }
+    }).on('CoinReleased', async (bridgeLockId: any, preimage: any) => {
+      console.log("CoinReleased")
+      try {
+        this.setState({message: 'Coin released, locking bridge on source chain...'})
+        const lockBridgeTx = await destBridge.lockBridge(bridgeLockId, preimage);
+        const lockBridgeReceipt = await lockBridgeTx.wait();
+        if(lockBridgeReceipt.status !== 1){
+          this.showError("Validator lock src bridge Tx failed.");
+        }
+
+        this.setState({
+          bridgeLocks: this.state.bridgeLocks.filter(a => a.id !== bridgeLockId),
+          releaseBridgeLocks: this.state.releaseLocks.filter(a => a.id !== bridgeLockId),
+          fetching: false
+        });
+      } catch(error){
+        this.showError(error.message);
+        this.setState({fetching: false});
+      }
+    }).on('CoinRefunded', async (bridgeLockId: any, preimage: any) => {
+      this.setState({message: 'Coin Refunded, locking release on target chain...'})
+      console.log(bridgeLockId);
+      console.log(preimage);
+      try{
+        const lockDestinationReleaseTx = await destBridge.lockRelease(bridgeLockId, preimage);
+        const lockDestRelReceipt = await lockDestinationReleaseTx.wait();
+        if(lockDestRelReceipt.status !== 1){
+          this.showError("Validator lock destination release Tx failed.");
+        }
+
+        this.setState({
+          bridgeLocks: this.state.bridgeLocks.filter(a => a.id !== bridgeLockId), 
+          releaseBridgeLocks: this.state.releaseLocks.filter(a => a.id !== bridgeLockId),
+          selectedBridgeLockId: '',
+          fetching: false}
+        );
+      } catch(error){
+        this.showError(error.message);
+        this.setState({fetching: false});
+      }
+    }).on('CoinRefundLocked', async (bridgeLockId: any) => {
+      console.log("CoinRefundLocked")
+      this.setState({
+        bridgeLocks: this.state.bridgeLocks.filter(a => a.id !== bridgeLockId), 
+        releaseBridgeLocks: this.state.releaseLocks.filter(a => a.id !== bridgeLockId),
+        fetching: false
+      });
+    })
   }
 
   public onConnect = async () => {
@@ -137,8 +284,9 @@ class App extends React.Component<any, any> {
 
     const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
 
-    const bridgeAddress = this.state.chainId === RINKEBY_CHAIN_ID ? REACT_APP_BRIDGE_ADDRESS_RINKEBY : REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
-    const bridgeContract = getContract(bridgeAddress, Bridge.abi, library, address);
+    const bridgeAddress = this.state.chainId === constants.CHAIN_ID.RINKEBY ? process.env.REACT_APP_BRIDGE_ADDRESS_RINKEBY : process.env.REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
+
+    const bridgeContract = getContract(bridgeAddress || '', Bridge.abi, library, address);
     const availableCoins: string[] = await bridgeContract.getAvailableCoins();
 
     const coins: ICoin[] = [];
@@ -153,32 +301,12 @@ class App extends React.Component<any, any> {
       address,
       connected: true,
       coins,
+      coinSelected: '',
+      secret: '',
     });
 
     await this.subscribeToProviderEvents(this.provider);
   };
-
-  // public submitElectionResult = async () => {
-  //   const { electionContract } = this.state;
-
-  //   const dataArr = [
-  //     'Idaho',
-  //     51,
-  //     50,
-  //     24
-	//   ];
-		
-	// 	await this.setState({ fetching: true });
-	// 	const transaction = await electionContract.submitStateResult(dataArr);
-
-	// 	await this.setState({ transactionHash: transaction.hash });
-		
-	// 	const transactionReceipt = await transaction.wait();
-	// 	if (transactionReceipt.status !== 1) {
-	// 		// React to failure
-	// 	}		
-
-  // };
   
   public subscribeToProviderEvents = async (provider:any) => {
     if (!provider.on) {
@@ -248,16 +376,136 @@ class App extends React.Component<any, any> {
 
   };
  
-  public onChangeSelectedNetwork = async (networkSelected: any) => {
+  public onClickChangeNetwork = async () => {
+    const networkSelected = this.state.chainId === constants.CHAIN_ID.RINKEBY ? constants.CHAIN_ID.ROPSTEN : constants.CHAIN_ID.RINKEBY;
       try {
         await window.ethereum.request({
           method: 'wallet_switchEthereumChain',
           params: [{ chainId: web3.utils.toHex(networkSelected)}],
         });
-        this.setState({networkSelected})
+        this.setState({networkSelected, connected: false, coins: []})
       } catch (err) {
-        console.log(err);
+        this.showError(err);
       }
+  }
+
+  public onCoinSelect = async (coinIndex: any) => {
+    const coinAddress = this.state.coins[Number(coinIndex)].address;
+    const library = new Web3Provider(this.provider);
+    const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
+    const erc20 = getContract(coinAddress, ERC20, library, address);
+
+    const amount = await erc20.balanceOf(address);
+
+    this.setState({
+      coinSelected: coinIndex,
+      coinBalance: amount
+    });
+  }
+
+  public onClickBridge = async () => {
+    this.setState({message: 'Approving allowance for coin...', fetching: true});
+
+    try {
+      const library = new Web3Provider(this.provider);
+      const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
+
+      const bridgeAddress = this.state.chainId === constants.CHAIN_ID.RINKEBY ? process.env.REACT_APP_BRIDGE_ADDRESS_RINKEBY : process.env.REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
+      const bridgeContract = getContract(bridgeAddress || '', Bridge.abi, library, address);
+      const erc20Address = this.state.coins[this.state.coinSelected].address;
+      const erc20 = getContract(erc20Address, ERC20, library, address);
+      const amount = web3.utils.toWei(this.state.coinAmount);
+
+      const hashlock = web3.utils.keccak256(ethers.utils.hexZeroPad(web3.utils.asciiToHex(this.state.bridgeSecret, 32), 32));
+
+      const aproveTx = await erc20.approve(bridgeAddress, amount);
+      const aproveReceipt = await aproveTx.wait();
+      if (aproveReceipt.status !== 1){
+        this.showError("Aprove Tx for the bridge Tx failed.");
+        this.setState({fetching: false});
+        return;
+      }
+
+      this.setState({message: 'Bridging coin...'});
+      const bridgeTx = await bridgeContract.bridgeCoin(erc20Address, amount, hashlock);
+      const bridgeReceipt = await bridgeTx.wait();
+
+      if(bridgeReceipt.status !== 1){
+        this.showError("Bridge Tx failed.")
+        this.setState({fetching: false});
+      }
+    } catch (error) {
+      this.showError(error.message);  
+      this.setState({fetching: false});
+    }
+
+    this.setState({
+      bridgeSecret: '',
+      coinAmount: '',
+    })
+  }
+
+  public onClickRefund = async () => {
+    this.setState({message: 'Refunding coin...', fetching: true});
+    try {
+      const library = new Web3Provider(this.provider);
+      const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
+
+      const bridgeAddress = this.state.chainId === constants.CHAIN_ID.RINKEBY ? process.env.REACT_APP_BRIDGE_ADDRESS_RINKEBY : process.env.REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
+      const bridgeContract = getContract(bridgeAddress || '', Bridge.abi, library, address);
+      const refundTx = await bridgeContract.refund(
+        this.state.selectedBridgeLockId, 
+        ethers.utils.hexZeroPad(web3.utils.asciiToHex(this.state.refundSecret, 32), 32)
+      );
+
+      const refundReceipt = await refundTx.wait();
+      if(refundReceipt.status !== 1){
+        this.showError("Refund Tx failed.")
+        this.setState({fetching: false});
+      }
+    } catch (error) {
+      this.setState({fetching: false});
+      this.showError(error.message);  
+    }
+
+    this.setState({
+      refundSecret: '',
+      selectedBridgeLockId: '',
+    })
+  }
+
+  public onClickRelease = async () => {
+    try {
+      const library = new Web3Provider(this.provider);
+      const address = this.provider.selectedAddress ? this.provider.selectedAddress : this.provider?.accounts[0];
+
+      const bridgeAddress = this.state.chainId === constants.CHAIN_ID.RINKEBY ? process.env.REACT_APP_BRIDGE_ADDRESS_RINKEBY : process.env.REACT_APP_BRIDGE_ADDRESS_ROPSTEN;
+      const bridgeContract = getContract(bridgeAddress || '', Bridge.abi, library, address);
+      const releaseTx = await bridgeContract.releaseCoin(
+        this.state.releaseAddress,
+        this.state.selectedReleaseLockId, 
+        ethers.utils.hexZeroPad(web3.utils.asciiToHex(this.state.releaseSecret, 32), 32)
+      );
+
+      const releaseReceipt = await releaseTx.wait();
+      if(releaseReceipt.status !== 1){
+        this.showError("Release Tx failed.")
+        this.setState({fetching: false});
+      }
+    } catch (err) {
+      this.showError(err);
+      this.setState({fetching: false});
+    }
+
+    this.setState({
+      refundSecret: '',
+      selectedReleaseLockId: '',
+      releaseAddress: '',
+    })
+  }
+
+  public showError = (message: string, e?: any) => {
+    console.log(message, e);
   }
 
   public render = () => {
@@ -267,7 +515,18 @@ class App extends React.Component<any, any> {
       chainId,
       coins,
       coinSelected,
-      fetching
+      fetching,
+      coinAmount,
+      bridgeSecret,
+      refundSecret,
+      releaseSecret,
+      networkSelected,
+      bridgeLocks,
+      releaseLocks,
+      selectedBridgeLockId,
+      message,
+      selectedReleaseLockId,
+      releaseAddress,
     } = this.state;
     return (
       <SLayout>
@@ -278,50 +537,58 @@ class App extends React.Component<any, any> {
             chainId={chainId}
             killSession={this.resetApp}
           />
+          <Button disabled={fetching} onClick={() => this.onClickChangeNetwork()}>Switch network</Button>
           <SContent>
-            <Column center>
-              <FormControl >
-                <InputLabel id="demo-simple-select-label">Source network</InputLabel>
-                <Select
-                  labelId="demo-simple-select-label"
-                  id="demo-simple-select"
-                  value={this.state.networkSelected}
-                  label="Age"
-                  
-                  defaultValue={RINKEBY_CHAIN_ID}
-                  onChange={(event) => this.onChangeSelectedNetwork(event.target.value)}
-                >
-                  <MenuItem value={`${ROPSTEN_CHAIN_ID}`}>Ropsten</MenuItem>
-                  <MenuItem value={`${RINKEBY_CHAIN_ID}`}>Rinkeby</MenuItem>
-                </Select>
-              </FormControl>
-              { connected &&
-              <>
-              { coins.length > 0 &&<FormControl >
-                <InputLabel id="demo-simple-select-label">Coin</InputLabel>
-                <Select
-                  labelId="demo-simple-select-label"
-                  id="demo-simple-select"
-                  value={this.state.coinSelected}
-                  label="Age"
-                  onChange={(event) => this.setState({coinSelected: Number(event.target.value)})}
-                >
-                 {coins.map((coin, i) => <MenuItem key={i} value={i}>{coin.symbol}</MenuItem>)} 
-                </Select>
-              </FormControl>
-              }
-              {coinSelected !== -1 && <Button >Bridge</Button>}
-              </>}
-            </Column>
+            <SColumn>
+              <h3>Bridge coins</h3>
+              <BridgeForm 
+                connected = {connected}
+                selectedNetwork = {networkSelected}
+                coins = {coins}
+                selectedCoin = {coinSelected}
+                onCoinSelect = {this.onCoinSelect}
+                coinAmount = {coinAmount}
+                secret = {bridgeSecret}
+                onClickBridge = {this.onClickBridge}
+                onCoinAmountChange = {(value: string) => this.setState({coinAmount :value})}
+                onSecretChange = {(bridgeSecret: string) => this.setState({bridgeSecret})}
+                fetching = {fetching}
+              />
+            </SColumn>
+              <SColumn>
+                  <RefundForm
+                    bridgeLocks = {bridgeLocks}
+                    fetching = {fetching}
+                    selectedBridgeLockId = {selectedBridgeLockId}
+                    secret = {refundSecret}
+                    onClickRefund = {this.onClickRefund}
+                    onChangeSelectedRefund = {(selectedBridgeLockId: string) => this.setState({selectedBridgeLockId})}
+                    onSecretChange = {(refundSecret: string) => this.setState({refundSecret})}
+                  />
+              </SColumn>
+              <SColumn>
+                <ReleaseForm
+                  releaseLocks={releaseLocks}
+                  secret = {releaseSecret}
+                  selectedReleaseLockId = {selectedReleaseLockId}
+                  onChangeSelectedRefund = {(selectedReleaseLockId: string) => this.setState({selectedReleaseLockId})}
+                  onSecretChange = {(releaseSecret: string) => this.setState({releaseSecret})}
+                  fetching = {fetching}
+                  onClickRelease = {this.onClickRelease}
+                  releaseAddress = {releaseAddress}
+                  onChangeReleaseAddress = {(releaseAddress: string) => this.setState({releaseAddress})}
+                />
+              </SColumn>
             {fetching ? (
               <Column center>
                 <SContainer>
                   <Loader />
+                  <Message>{message}</Message>
                 </SContainer>
               </Column>
             ) : (
                 <SLanding center>
-                  {!this.state.connected && this.state.networkSelected !== 0 && <ConnectButton onClick={this.onConnect} />}
+                  {!this.state.connected && this.state.networkSelected !== '' && <ConnectButton onClick={this.onConnect} />}
                 </SLanding>
               )}
           </SContent>

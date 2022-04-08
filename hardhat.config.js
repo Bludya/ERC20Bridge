@@ -19,15 +19,6 @@ task("deploy", "Deploys VAL coin and bridge contract on a provided network")
 
     const valCoinAddr = await deployValCoin();
     const bridgeContract = await deployERC20BridgeContract(valCoinAddr);
-
-    await bridgeContract.deployTransaction.wait(5);
-
-    await hre.run("verify:verify", {
-      address: bridgeContract.address,
-      constructorArguments: [
-        valCoinAddr
-      ],
-    });
 });
 
 /**
@@ -43,7 +34,11 @@ module.exports = {
   },
   networks: {
     rinkeby: {
-      url: env.rinkebyUrl,
+      url: 'https://rinkeby.infura.io/v3/' + env.infuraId,
+      accounts: env.privateKeys,
+    },
+    ropsten: {
+      url: 'https://ropsten.infura.io/v3/' + env.infuraId,
       accounts: env.privateKeys,
     }
   },
