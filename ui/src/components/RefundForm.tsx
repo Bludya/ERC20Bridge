@@ -4,7 +4,7 @@ import Button from "./Button"
 import Column from "./Column";
 
 interface IBridgeFormProps {
-    bridgeLocks: []
+    bridgeLocks: object[]
     selectedBridgeLockId: string
     secret: string
     onClickRefund: () => void

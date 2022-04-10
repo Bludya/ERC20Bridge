@@ -4,7 +4,7 @@ import Column from "./Column";
 import Button from "./Button"
 
 interface IBridgeFormProps {
-    releaseLocks: []
+    releaseLocks: object[]
     selectedReleaseLockId: string
     fetching: boolean
     secret: string

@@ -221,7 +221,7 @@ export const globalStyle = `
   }
 
   .MuiFormControl-root {
-    width: 250px !important; 
+    width: 150px !important; 
     margin-bottom: 20px;
   }
   .MuiFormControl-root label {
@@ -234,5 +234,20 @@ export const globalStyle = `
 
   Button {
     margin-top: 10px;
+  }
+  .MuiList-root {
+    height: 200px;
+    border: 1px solid;
+  }
+
+  .MuiMenu-paper {
+    height: 100px;
+    width: 150px;
+  }
+  .MuiListItem-root {
+    height: 50px;
+  }
+  .MuiList-root {
+    overflow:auto;
   }
 `

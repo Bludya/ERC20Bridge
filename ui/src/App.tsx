@@ -22,8 +22,7 @@ import RefundForm from './components/RefundForm';
 import ReleaseForm from './components/ReleaseForm';
 import { Alert, AlertTitle } from '@material-ui/lab';
 import BigNumber from 'bignumber.js';
-import { FormControl, InputLabel, Select, MenuItem } from '@material-ui/core';
-
+import { FormControl, InputLabel, Select, MenuItem, List, ListItem } from '@material-ui/core';
 
 const EMPTY_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -61,7 +60,7 @@ const SLanding = styled(Column)`
 `;
 
 const SColumn = styled(Column)`
-  width: 33%;
+  width: 20%;
 `;
 
 // @ts-ignore
@@ -91,13 +90,15 @@ interface IAppState {
   bridgeSecret: string;
   refundSecret: string;
   releaseSecret: string;
-  bridgeLocks: [];
+  bridgeLocks: object[];
   selectedBridgeLockId: string;
-  releaseLocks: [];
+  releaseLocks: object[];
   selectedReleaseLockId: string;
   releaseAddress: string;
-  showError: boolean,
-  errorMessage: string,
+  showError: boolean;
+  errorMessage: string;
+  showSuccess: boolean;
+  txHash: string;
 }
 
 const INITIAL_STATE: IAppState = {
@@ -126,6 +127,8 @@ const INITIAL_STATE: IAppState = {
   releaseAddress: '',
   showError: false,
   errorMessage: '',
+  showSuccess: false,
+  txHash: '',
 };
 
 class App extends React.Component<any, any> {
@@ -222,8 +225,7 @@ class App extends React.Component<any, any> {
       try {
         this.setState({message: 'Coin released, locking bridge on source chain...'})
         const bridgeStruct = (await srcBridge.getBridges()).find((b: any) => b.id === bridgeId);
-        const destBridge = this.bridges[bridgeStruct.srcChainId];
-        console.log(bridgeStruct);
+        const destBridge = this.bridges[bridgeStruct.srcChainId];;
         const lockBridgeTx = await destBridge.lockBridge(bridgeId, preimage);
         const lockBridgeReceipt = await lockBridgeTx.wait();
         if(lockBridgeReceipt.status !== 1){
@@ -239,7 +241,6 @@ class App extends React.Component<any, any> {
       try{
         
         const bridgeStruct = (await srcBridge.getBridges()).find((b: any) => b.id === bridgeId);
-        console.log(bridgeStruct);
         const destBridge = this.bridges[bridgeStruct.dstChainId];
 
         const lockDestinationReleaseTx = await destBridge.lockBridge(bridgeId, preimage);
@@ -268,9 +269,9 @@ class App extends React.Component<any, any> {
       coins.push({address: coinAddr, symbol: await coinContract.symbol()});
     }
     
-    let bridgeLocks = (await bridgeContract.getBridges()).filter((a: any) => (a.sender.toLowerCase() === this.state.address || a.receiver.toLowerCase() === this.state.address) && a.active);
+    let totalBridges = (await bridgeContract.getBridges()).filter((a: any) => (a.sender.toLowerCase() === this.state.address || a.receiver.toLowerCase() === this.state.address ));
 
-    bridgeLocks = bridgeLocks.map((a: any) => {
+    totalBridges = totalBridges.map((a: any) => {
       const bridgeLock = {
         id: a.id,
         coin: a.coin,
@@ -284,8 +285,8 @@ class App extends React.Component<any, any> {
       return bridgeLock;
     });
 
-    const bridges = bridgeLocks.filter((a: any) => a.sender.toLowerCase() === this.state.address && a.isThisSrc);
-    const releases = bridgeLocks.filter((a: any) => a.receiver.toLowerCase() === this.state.address  && !a.isThisSrc);
+    const bridges = totalBridges.filter((a: any) => a.sender.toLowerCase() === this.state.address && a.isThisSrc);
+    const releases = totalBridges.filter((a: any) => a.receiver.toLowerCase() === this.state.address  && !a.isThisSrc);
 
     for( const bridge of bridges) {
       const coinContract = getContract(bridge.coin, ERC20, this.state.library, this.state.address);
@@ -485,6 +486,7 @@ class App extends React.Component<any, any> {
         this.showError("Bridge Tx failed.")
         this.setState({fetching: false});
       }
+      this.showSuccess(bridgeReceipt.transactionHash);
     } catch (error) {
       this.showError(error.message);  
       this.setState({fetching: false});
@@ -504,6 +506,7 @@ class App extends React.Component<any, any> {
         this.showError("Refund Tx failed.")
         this.setState({fetching: false});
       }
+      this.showSuccess(refundReceipt.transactionHash);
     } catch (error) {
       this.setState({fetching: false});
       this.showError(error.message);  
@@ -523,8 +526,9 @@ class App extends React.Component<any, any> {
         this.showError("Release Tx failed.")
         this.setState({fetching: false});
       }
+
+      this.showSuccess(releaseReceipt.transactionHash);
     } catch (err) {
-      console.log(err);
       this.showError(err.message);
       this.setState({fetching: false});
     }
@@ -534,6 +538,13 @@ class App extends React.Component<any, any> {
     this.setState({
       showError: true,
       errorMessage: message,
+    })
+  }
+
+  public showSuccess = (message: string) => {
+    this.setState({
+      showSuccess: true,
+      txHash: message,
     })
   }
 
@@ -575,19 +586,28 @@ class App extends React.Component<any, any> {
             <AlertTitle>Error</AlertTitle>
             {this.state.errorMessage}
           </Alert>}
+          {this.state.showSuccess && 
+          <Alert severity = {"success"}  
+            onClose = {() => this.setState({showSuccess: false, txHash: ''})}
+          >
+            <AlertTitle>Success</AlertTitle>
+            <a href={`https://${constants.CHAINS.find((c) => c.chainId === this.state.networkSelected).name}.etherscan.io/tx/${this.state.txHash}`} target="_blank">
+              {this.state.txHash}
+            </a>
+          </Alert>}
           <FormControl >
-                <InputLabel id="network-select-label">Network</InputLabel>
-                <Select
-                    fullWidth 
-                    labelId="network-select-label"
-                    id="network-select"
-                    value={this.state.networkSelected}
-                    label="network"
-                    onChange={(event: any) => this.onNetworkSelected(typeof event.target.value === 'string' ? event.target.value : '')}
-                >
-                    {constants.CHAINS.map((chain, i) => <MenuItem key={i} value={chain.chainId}>{chain.name}</MenuItem>)} 
-                </Select>
-            </FormControl>
+            <InputLabel id="network-select-label">Network</InputLabel>
+              <Select
+                  fullWidth 
+                  labelId="network-select-label"
+                  id="network-select"
+                  value={this.state.networkSelected}
+                  label="network"
+                  onChange={(event: any) => this.onNetworkSelected(typeof event.target.value === 'string' ? event.target.value : '')}
+              >
+                  {constants.CHAINS.map((chain, i) => <MenuItem key={i} value={chain.chainId}>{chain.name}</MenuItem>)} 
+              </Select>
+          </FormControl>  
           <SContent>
             <SColumn>
               <BridgeForm 
@@ -612,7 +632,7 @@ class App extends React.Component<any, any> {
             <SColumn>
               <RefundForm
                 fetching = {fetching}
-                bridgeLocks = {bridgeLocks}
+                bridgeLocks = {bridgeLocks.filter((b: any) => b.active)}
                 selectedBridgeLockId = {selectedBridgeLockId}
                 secret = {refundSecret}
                 onClickRefund = {this.onClickRefund}
@@ -623,13 +643,25 @@ class App extends React.Component<any, any> {
             <SColumn>
               <ReleaseForm
                 fetching = {fetching}
-                releaseLocks={releaseLocks}
+                releaseLocks={releaseLocks.filter((b: any) => b.active)}
                 selectedReleaseLockId = {selectedReleaseLockId}
                 secret = {releaseSecret}
                 onChangeSelectedRelease = {(selectedReleaseLockId: string) => this.setState({selectedReleaseLockId})}
                 onSecretChange = {(releaseSecret: string) => this.setState({releaseSecret})}
                 onClickRelease = {this.onClickRelease}
               />
+            </SColumn>
+            <SColumn>
+              <div>Previous bridges</div>
+              <List dense = {true}>
+                  {bridgeLocks.map((bridge: any, i: number) => <ListItem key={i}>{bridge.amount + ' ' + bridge.symbol}</ListItem>)}
+              </List>
+            </SColumn>
+            <SColumn>
+              <div>Previous releases</div>
+              <List>
+                {releaseLocks.map((bridge: any, i: number) => <ListItem key={i}>{bridge.amount + ' ' + bridge.symbol}</ListItem>)}
+              </List>
             </SColumn>
             {fetching ? (
               <Column center>
@@ -648,6 +680,7 @@ class App extends React.Component<any, any> {
       </SLayout>
     );
   };
+
 }
 
 export default App;

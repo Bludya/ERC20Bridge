@@ -9,7 +9,7 @@ task("deploy", "Deploys coins and bridge contract on a provided network")
     await hre.run('compile'); // We are compiling the contracts using subtask
     const coins = [];
 
-    for(let i = 0; i < 1; i++){
+    for(let i = 0; i < 3; i++){
       const name = 'Coin ' + i;
       const symbol = 'VAL' + i;
       const coin = {
