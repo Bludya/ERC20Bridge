@@ -1,5 +1,6 @@
 import { FormControl, Input, InputLabel, MenuItem, Select } from "@material-ui/core"
 import React from "react"
+import constants from "../constants/constants"
 import Button from "./Button"
 import Column from "./Column"
 
@@ -12,6 +13,7 @@ interface IBridgeFormProps {
     connected: boolean
     selectedNetwork: string
     coins: ICoin[]
+    destinationNetwork: string
     selectedCoin: string
     releaseAddress: string
     coinAmount: string
@@ -19,6 +21,7 @@ interface IBridgeFormProps {
     secret: string
     fetching: boolean
     onCoinSelect: (value: string) => void
+    onDestinationNetworkSelected: (value: string) => void
     onCoinAmountChange: (value: string) => void
     onSecretChange: (value: string) => void
     onClickBridge: () => void
@@ -41,6 +44,19 @@ const BridgeForm = (props: IBridgeFormProps) => (
                     onChange={(event) => props.onCoinSelect(typeof event.target.value === 'string' ? event.target.value : '')}
                 >
                     {props.coins.map((coin, i) => <MenuItem key={i} value={i.toString()}>{coin.symbol}</MenuItem>)} 
+                </Select>
+            </FormControl>
+            <FormControl >
+                <InputLabel id="dst-network-select-label">Destination Network</InputLabel>
+                <Select
+                    fullWidth 
+                    labelId="dst-network-select-label"
+                    id="dst-network-select"
+                    value={props.destinationNetwork}
+                    label="network"
+                    onChange={(event: any) => props.onDestinationNetworkSelected(typeof event.target.value === 'string' ? event.target.value : '')}
+                >
+                    {constants.CHAINS.filter(chain => chain.chainId !== props.selectedNetwork).map((chain, i) => <MenuItem key={i} value={chain.chainId}>{chain.name}</MenuItem>)} 
                 </Select>
             </FormControl>
             <FormControl>

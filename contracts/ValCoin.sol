@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract ValCoin is ERC20 {
     uint constant _initial_supply = 20000000000 * (10**18);
-    constructor() ERC20("ValCoin", "VAL") {
+    constructor(string memory _name, string memory _symbol) ERC20(_name, _symbol) {
         _mint(msg.sender, _initial_supply);
     }
 }

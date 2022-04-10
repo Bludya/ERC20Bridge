@@ -219,4 +219,20 @@ export const globalStyle = `
   textarea {
     font-size: 16px;
   }
+
+  .MuiFormControl-root {
+    width: 250px !important; 
+    margin-bottom: 20px;
+  }
+  .MuiFormControl-root label {
+    transform: translate(0, 10px) scale(1);
+  }
+
+  .MuiFormControl-root .MuiFormLabel-filled {
+    transform: translate(0, 0px) scale(0.7);
+  }
+
+  Button {
+    margin-top: 10px;
+  }
 `

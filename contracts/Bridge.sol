@@ -5,36 +5,24 @@ pragma abicoder v2;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MintableERC20 } from "./MintableERC20.sol";
+import { BridgeUtils } from "./BridgeUtils.sol";
 
 contract ERC20Bridge is Ownable {
-    event CoinContractAdded(address newContract);
-    event CoinBridged(bytes32 bridgeLock);
-    event CoinRefunded(bytes32 bridgeLock, bytes32 preimage);
-    event CoinRefundLocked(bytes32 bridgeLock);
-    event ReleaseAdded(bytes32 bridgeLock);
-    event CoinReleased(bytes32 bridgeLock, bytes32 preimage);
-    event AddedDestination(address dest, address src);
-    event CoinReleaseLocked(bytes32 bridgeLock);
-
-    struct BridgeLock {
-        bytes32 id;
-        bytes32 hashlock;
-        bytes32 preimage;
-        address erc20Contract;
-        address sender;
-        address receiver;
-        uint256 amount;
-        bool active;
-        bool isThisSrc;
-    }
-
-    modifier bridgeExists(bytes32 _bridgeLockId) {
-        require(haveBridgeLock(_bridgeLockId), "bridge does not exist");
+    
+    event CoinBridged(bytes32 bridgeId);
+    event CoinRefunded(bytes32 bridgeId, bytes32 preimage);
+    event CoinRefundLocked(bytes32 bridgeId);
+    event ReleaseAdded(bytes32 bridgeId);
+    event CoinReleased(bytes32 bridgeId, bytes32 preimage);
+    event CoinReleaseLocked(bytes32 bridgeId);
+    
+    modifier bridgeExists(bytes32 _Id) {
+        require(bridges[_Id].sender != address(0), "bridge does not exist");
         _;
     }
 
-    modifier active(bytes32 _bridgeLockId) {
-        require(bridges[_bridgeLockId].active, "refundable: already refunded");
+    modifier active(bytes32 _Id) {
+        require(bridges[_Id].active, "refundable: already refunded");
         _;
     }
 
@@ -43,50 +31,60 @@ contract ERC20Bridge is Ownable {
         _;
     }
     
-    address[] private coinContracts;
-    bytes32[] private bridgeIds;
-    mapping (bytes32 => BridgeLock) private bridges;
-    mapping (address => bool) private originalContracts;
-    mapping (address => address) private contractMap;
+    uint8 chainId;
 
-    function addCoin(address _contract) 
+    address[] private coins;
+    bytes32[] private bridgeIds;
+    mapping (bytes32 => BridgeUtils.Bridge) private bridges;
+    mapping (address => bool) private origCoins;
+    mapping (address => uint8) private dstToOrigChainIds;
+    mapping (address => address) private coinMap;
+
+    constructor (uint8 _chainId) Ownable(){
+        chainId = _chainId;
+    }
+
+    function addCoin(address _coin) 
         external 
         onlyOwner 
     {
-        require(!isContractOriginal(_contract), "Coin already exists as original");
-        coinContracts.push(_contract);
-        originalContracts[_contract] = true;
-
-        emit CoinContractAdded( _contract);
+        require(!isCoinOriginal(_coin), "Coin already exists as original");
+        coins.push(_coin);
+        origCoins[_coin] = true;
     }
 
     function bridgeCoin(
-        address _srcErc20, 
+        address _srcCoin, 
         address _receiver,
         uint256 _amount,
-        bytes32 _hashlock
+        bytes32 _hashlock,
+        uint8 _dstChainId
     ) 
         external 
     {
         require(_amount > 0, "token amount must be > 0");
 
-        bytes32 bridgeLockId = keccak256(
+        bytes32 Id = keccak256(
             abi.encodePacked(
                 msg.sender,
                 block.timestamp
             )
         );
 
+        require(bridges[Id].sender == address(0), "Bridge exists");
 
-        require(!haveBridgeLock(bridgeLockId), "Bridge with same parameters already exists");
+        bool isOriginalCoin = origCoins[_srcCoin];
+        require(isOriginalCoin || dstToOrigChainIds[_srcCoin] == _dstChainId, "dstChainId != srcChainId");
         
-        bridgeIds.push(bridgeLockId);
+        bridgeIds.push(Id);
 
-        bridges[bridgeLockId] = BridgeLock(
-            bridgeLockId,
+        bridges[Id] = BridgeUtils.Bridge(
+            Id,
             _hashlock,
             0x0,
-            _srcErc20,
+            chainId,
+            _dstChainId,
+            _srcCoin,
             msg.sender,
             _receiver,
             _amount,
@@ -94,80 +92,82 @@ contract ERC20Bridge is Ownable {
             true
         );
 
-        if(!originalContracts[_srcErc20]) {
-            if (!MintableERC20(_srcErc20).burn(msg.sender, _amount))
+        if(!isOriginalCoin) {
+            if (!MintableERC20(_srcCoin).burn(msg.sender, _amount))
                 revert("burn failed");
         } else {
-            if (!ERC20(_srcErc20).transferFrom(msg.sender, address(this), _amount))
-                revert("transferFrom sender to this failed");
+            if (!ERC20(_srcCoin).transferFrom(msg.sender, address(this), _amount))
+                revert("transferFrom failed");
         }
 
-        emit CoinBridged(bridgeLockId);
+        emit CoinBridged(Id);
     }
 
-    function lockBridge(bytes32 _bridgeLockId, bytes32 _preimage)
+    function lockBridge(bytes32 _Id, bytes32 _preimage)
         external
         onlyOwner
-        bridgeExists(_bridgeLockId)
-        active(_bridgeLockId)
-        hashlockMatches(bridges[_bridgeLockId].hashlock, _preimage)
+        bridgeExists(_Id)
+        active(_Id)
+        hashlockMatches(bridges[_Id].hashlock, _preimage)
     {
-        BridgeLock storage c = bridges[_bridgeLockId];
+        BridgeUtils.Bridge storage c = bridges[_Id];
         c.active = false;
         c.preimage = _preimage;
-        emit CoinRefundLocked(_bridgeLockId);
+        emit CoinRefundLocked(_Id);
     }
 
-    function refund(bytes32 _bridgeLockId, bytes32 _preimage)
+    function refund(bytes32 _Id, bytes32 _preimage)
         external
-        bridgeExists(_bridgeLockId)
-        active(_bridgeLockId)
-        hashlockMatches(bridges[_bridgeLockId].hashlock, _preimage)
+        bridgeExists(_Id)
+        active(_Id)
+        hashlockMatches(bridges[_Id].hashlock, _preimage)
     {
-        require(bridges[_bridgeLockId].sender == msg.sender, "refundable: not sender");
+        require(bridges[_Id].sender == msg.sender, "refundable: not sender");
 
-        BridgeLock storage c = bridges[_bridgeLockId];
+        BridgeUtils.Bridge storage c = bridges[_Id];
         c.active = false;
         c.preimage = _preimage;
 
-        if(!originalContracts[c.erc20Contract]) {
-            if (!MintableERC20(c.erc20Contract).mint(msg.sender, c.amount))
+        if(!origCoins[c.coin]) {
+            if (!MintableERC20(c.coin).mint(msg.sender, c.amount))
                 revert("refund failed");
         } else {
-            if (!ERC20(c.erc20Contract).transfer(c.sender, c.amount))
+            if (!ERC20(c.coin).transfer(c.sender, c.amount))
                 revert("transferFrom sender to this failed");
         }
 
-        emit CoinRefunded(_bridgeLockId, _preimage);
+        emit CoinRefunded(_Id, _preimage);
     }
 
     function addMissingDestination(
-        bool shouldDeploy,
-        address _destErc20,
-        address _sourceErc20, 
+        bool _shouldDeploy,
+        uint8 _srcChainId,
+        address _dstCoin,
+        address _srcCoin, 
         string memory _coinName, 
         string memory _coinDenom
     )
         external
         onlyOwner
     {
-        require(!destinationExists(_sourceErc20), "Contract already exists for this source");
+        require(!destinationExists(_srcCoin), "Contract already exists for this source");
 
-        if(shouldDeploy){
-            MintableERC20 destContract = new MintableERC20(_coinName, _coinDenom);
-            _destErc20 = address(destContract);
-            contractMap[_sourceErc20] = _destErc20;
-            coinContracts.push(_destErc20);
+        if(_shouldDeploy){
+            MintableERC20 destCoin = new MintableERC20(_coinName, _coinDenom);
+            _dstCoin = address(destCoin);
+
+            dstToOrigChainIds[_dstCoin] = _srcChainId;
+            coinMap[_srcCoin] = _dstCoin;
+            coins.push(_dstCoin);
         } else {  
-            contractMap[_destErc20] = _sourceErc20;
+            coinMap[_dstCoin] = _srcCoin;
         }
-
-        emit AddedDestination(_destErc20, _sourceErc20);
     }
 
     function addRelease(
-        bytes32 _bridgeLockId,
-        address _sourceErc20,
+        bytes32 _Id,
+        uint8 _srcChainId,
+        address _srcCoin,
         address _sender,
         address _receiver,
         uint256 _amount,
@@ -176,18 +176,20 @@ contract ERC20Bridge is Ownable {
         onlyOwner
         external
     {
-        require(!haveBridgeLock(_bridgeLockId), "Release already exists");
+        require(bridges[_Id].sender == address(0), "Release exists");
 
-        require(destinationExists(_sourceErc20), "Destination contract does not exist. Deploy first");
+        require(destinationExists(_srcCoin), "Destination does not exist");
 
         
-        bridgeIds.push(_bridgeLockId);
+        bridgeIds.push(_Id);
 
-        bridges[_bridgeLockId] = BridgeLock(
-            _bridgeLockId,
+        bridges[_Id] = BridgeUtils.Bridge(
+            _Id,
             _hashlock,
             0x0,
-            _sourceErc20,
+            _srcChainId,
+            chainId,
+            _srcCoin,
             _sender,
             _receiver,
             _amount,
@@ -195,45 +197,45 @@ contract ERC20Bridge is Ownable {
             false
         );
 
-        emit ReleaseAdded(_bridgeLockId);
+        emit ReleaseAdded(_Id);
     }
 
     function releaseCoin(
-        bytes32 _bridgeLockId, 
+        bytes32 _Id, 
         bytes32 _preimage
     ) 
         external 
-        bridgeExists(_bridgeLockId)
-        hashlockMatches(bridges[_bridgeLockId].hashlock, _preimage)
-        active(_bridgeLockId)
+        bridgeExists(_Id)
+        hashlockMatches(bridges[_Id].hashlock, _preimage)
+        active(_Id)
     {
-        BridgeLock storage r = bridges[_bridgeLockId];
+        BridgeUtils.Bridge storage r = bridges[_Id];
 
-        require(r.receiver == msg.sender, "msg.sender not bridgelock receiver");
+        require(r.receiver == msg.sender, "msg.sender != receiver");
 
         r.active = false;
         r.preimage = _preimage;
         
-        address destContract = getDestinationContract(r.erc20Contract);
+        address destCoin = coinMap[r.coin];
         
-        if(!isContractOriginal(destContract)){
-            if(!MintableERC20(destContract).mint(msg.sender, r.amount)){
+        if(!isCoinOriginal(destCoin)){
+            if(!MintableERC20(destCoin).mint(msg.sender, r.amount)){
                 revert("mint failed");
             }
         } else {
-            if(!ERC20(destContract).transfer(msg.sender, r.amount)) {
+            if(!ERC20(destCoin).transfer(msg.sender, r.amount)) {
                 revert("transfer failed");
             }
         }
-        emit CoinReleased(_bridgeLockId, _preimage);
+        emit CoinReleased(_Id, _preimage);
     }
 
-    function isContractOriginal(address _coinContract)
+    function isCoinOriginal(address _coinContract)
         public
         view
         returns (bool)
     {
-        return originalContracts[_coinContract];
+        return origCoins[_coinContract];
     }
 
     function destinationExists(address _srcCoin) 
@@ -241,15 +243,7 @@ contract ERC20Bridge is Ownable {
         view 
         returns (bool) 
     {
-           return getDestinationContract(_srcCoin) != address(0);
-    }
-
-    function getDestinationContract(address _srcContract)
-        public
-        view
-        returns (address)
-    {
-        return contractMap[_srcContract];
+           return coinMap[_srcCoin] != address(0);
     }
 
     function getAvailableCoins() 
@@ -257,33 +251,33 @@ contract ERC20Bridge is Ownable {
         view 
         returns (address[] memory) 
     {
-        return coinContracts;
+        return coins;
     }
 
-    function getBridgeLock(bytes32 _bridgeLockId) 
-        public
+    function getDstCoin(address _coin)
+        external
         view
-        returns ( BridgeLock memory c) 
+        returns (address)
     {
-        c = bridges[_bridgeLockId];
-    } 
+        return coinMap[_coin];
+    }
 
-    function haveBridgeLock(bytes32 _bridgeLockId)
-        internal
+    function getDestToOriginChainId(address _coin) 
+        external
         view
-        returns (bool)
+        returns (uint8)
     {
-        return getBridgeLock(_bridgeLockId).sender != address(0);
+        return dstToOrigChainIds[_coin];
     }
 
     function getBridges()
         external
         view
-        returns (BridgeLock[] memory)
+        returns (BridgeUtils.Bridge[] memory)
     {
-        BridgeLock[] memory bls = new BridgeLock[]( bridgeIds.length );
+        BridgeUtils.Bridge[] memory bls = new BridgeUtils.Bridge[]( bridgeIds.length );
         for(uint i = 0; i < bridgeIds.length; i++){
-            bls[i] = getBridgeLock(bridgeIds[i]);
+            bls[i] = bridges[bridgeIds[i]];
         }
 
         return bls;
