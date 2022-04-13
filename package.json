@@ -29,5 +29,8 @@
     "ethers": "^5.5.4",
     "hardhat": "^2.8.4",
     "solidity-coverage": "^0.7.20"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0"
   }
 }
