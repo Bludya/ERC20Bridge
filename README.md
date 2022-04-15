@@ -1,12 +1,19 @@
 # ERC20Bridge
 ## Dictionary
 **bridging** - as a noun - A single `to-from` transition of a coin.That means that if a bridged coin is being bridged back to its original network, this is another **bridging**.
+
 **original coin** - a coin that was not deployed by the contract. Could be any ERC20 coin.
+
 **deployed/bridge coin** - a coin that was deployed by the bridge contract. It can mint and burn coins and is like a wrapper for the original coin, but on a certain destination network.
+
 **source bridge contract** - the contract on the network from which the **bridging** began.
+
 **destination bridge contract** - the contract on the network to which the **bridging** is supposed to end.
+
 **source/destination network** - similarly to the above
+
 **refund** - the user receives the bridged coins back on the source network for the **bridging**
+
 **release** - the use receives the bridged coins on the destination network for the **bridging**
 
 ## Segments
