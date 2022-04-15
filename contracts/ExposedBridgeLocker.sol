@@ -18,11 +18,10 @@ contract ExposedBridgeLocker is BridgeLocker {
         uint256 _amount,
         bytes32 _hashlock,
         uint8 _srcChainId,
-        uint8 _dstChainId,
-        bool _isThisSrc
+        uint8 _dstChainId
     ) 
         external 
     {
-        addBridgeLock(_id, _srcCoin, _sender, _receiver, _amount, _hashlock, _srcChainId, _dstChainId, _isThisSrc);
+        addBridgeLock(_id, _srcCoin, _sender, _receiver, _amount, _hashlock, _srcChainId, _dstChainId);
     }
 }

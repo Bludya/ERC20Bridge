@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import { MintableERC20 } from "./MintableERC20.sol";
 
-abstract contract BridgeLocker is Ownable {
+contract BridgeLocker is Ownable {
     event BridgeLocked(bytes32 bridgeId);
 
     modifier bridgeExists(bytes32 _id) {
@@ -29,18 +29,13 @@ abstract contract BridgeLocker is Ownable {
         _;
     }
 
-    modifier bridgeLockSenderOnly(bytes32 _id) {
-        require(getBridgeLock(_id).receiver == msg.sender, "msg.sender != receiver");
-        _;
-    }
-
     modifier isBridgeReceiver(bytes32 _id, address _address) {
-        require(getBridgeLock(_id).receiver == _address, "msg.sender != receiver");
+        require(getBridgeLock(_id).receiver == _address, "msg.sender != bridge.receiver");
         _;
     }
 
      modifier isBridgeSender(bytes32 _id, address _address) {
-        require(getBridgeLock(_id).sender == _address, "msg.sender != receiver");
+        require(getBridgeLock(_id).sender == _address, "msg.sender != bridge.sender");
         _;
     }
     
@@ -57,7 +52,6 @@ abstract contract BridgeLocker is Ownable {
         address receiver; //receiver address, used so that only he can release on target chain
         uint256 amount; //amount of the coins bridged
         bool active; //if true, the coin can still be released/refunded
-        bool isThisSrc; //indicates if this is an original coin, or a 'bridged' one. Needed when determining if should burn
     }
 
 
@@ -74,8 +68,7 @@ abstract contract BridgeLocker is Ownable {
         uint256 _amount,
         bytes32 _hashlock,
         uint8 _srcChainId,
-        uint8 _dstChainId,
-        bool _isThisSrc
+        uint8 _dstChainId
     ) 
         internal 
         bridgeNotExists(_id)
@@ -92,8 +85,7 @@ abstract contract BridgeLocker is Ownable {
             _sender,
             _receiver,
             _amount,
-            true,
-            _isThisSrc
+            true
         );
     }
 

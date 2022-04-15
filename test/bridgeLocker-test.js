@@ -18,7 +18,6 @@ const TEST_BRIDGELOCK = {
     hashLock: HASH_FROM_PREIMAGE,
     srcChainId: 1,
     dstChainId: 2,
-    isThisSrc: true,
 }
 
 describe("BridgeLocker", function () {
@@ -49,7 +48,6 @@ describe("BridgeLocker", function () {
             TEST_BRIDGELOCK.hashLock,
             TEST_BRIDGELOCK.srcChainId,
             TEST_BRIDGELOCK.dstChainId,
-            TEST_BRIDGELOCK.isThisSrc,
         )).to.not.revertedWith("Source chain id can't be the same as destination chain id");
     });
 
@@ -64,7 +62,6 @@ describe("BridgeLocker", function () {
             TEST_BRIDGELOCK.hashLock,
             TEST_BRIDGELOCK.srcChainId,
             TEST_BRIDGELOCK.dstChainId,
-            TEST_BRIDGELOCK.isThisSrc,
         )).to.revertedWith("bridge already exists exist");
     });
 
@@ -85,7 +82,6 @@ describe("BridgeLocker", function () {
         expect(bridgeLock.receiver).to.equal(TEST_BRIDGELOCK.receiver);
         expect(bridgeLock.amount).to.equal(TEST_BRIDGELOCK.amount);
         expect(bridgeLock.active);
-        expect(bridgeLock.isThisSrc).to.equal(TEST_BRIDGELOCK.isThisSrc);
     });
 
     it("Should be reverted when given incorrect preimage", async () => {

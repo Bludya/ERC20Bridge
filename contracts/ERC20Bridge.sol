@@ -29,13 +29,17 @@ contract ERC20Bridge is BridgeLocker {
         _;
     }
 
+    modifier chainIdMatch(uint8 _id) {
+        require(_id == chainId, "chain Id doesn't match cotract");
+        _;
+    }
 
     uint8 chainId;
 
     address[] private coins;
     mapping (address => bool) private origCoins;
-    mapping (address => uint8) private dstToOrigChainIds;
     mapping (address => address) private coinMap;
+    mapping (address => uint8) private dstToOrigChainIds;
 
     constructor (uint8 _chainId) {
         chainId = _chainId;
@@ -67,7 +71,7 @@ contract ERC20Bridge is BridgeLocker {
             )
         );
         
-        addBridgeLock(id, _srcCoin, msg.sender, _receiver, _amount, _hashlock, chainId, _dstChainId, true);
+        addBridgeLock(id, _srcCoin, msg.sender, _receiver, _amount, _hashlock, chainId, _dstChainId);
 
         if (!ERC20(_srcCoin).transferFrom(msg.sender, address(this), _amount))
             revert("transferFrom failed");
@@ -93,7 +97,7 @@ contract ERC20Bridge is BridgeLocker {
             )
         );
         
-        addBridgeLock(id, _srcCoin, msg.sender, _receiver, _amount, _hashlock, chainId, _dstChainId, true);
+        addBridgeLock(id, _srcCoin, msg.sender, _receiver, _amount, _hashlock, chainId, _dstChainId);
 
         if (!MintableERC20(_srcCoin).burn(msg.sender, _amount))
             revert("burn failed");
@@ -128,8 +132,8 @@ contract ERC20Bridge is BridgeLocker {
     function deployCoin(
         uint8 _srcChainId,
         address _srcCoin, 
-        string memory _coinName, 
-        string memory _coinDenom
+        string calldata _coinName, 
+        string calldata _coinDenom
     )
         external
         onlyOwner
@@ -142,15 +146,18 @@ contract ERC20Bridge is BridgeLocker {
         coins.push(destCoin);
     }
 
+    //to be set on the source contract for original coin
+    //when coin deployed on the destiantion
+    //in this case dstCoin is the original and the deployed is src
     function addDestination(
-        address _dstCoin,
-        address _srcCoin
+        address _deployedCoin,
+        address _originalCoin
     )
         external
         onlyOwner
-        destinationNotExists(_srcCoin)
+        destinationNotExists(_deployedCoin)
     {
-        coinMap[_dstCoin] = _srcCoin;
+        coinMap[_deployedCoin] = _originalCoin;
     }
 
     function addRelease(
@@ -167,7 +174,7 @@ contract ERC20Bridge is BridgeLocker {
         positiveAmount(_amount)
         srcDiffersDest(_srcChainId, chainId)
     {
-        addBridgeLock(_id, _srcCoin, _sender, _receiver, _amount, _hashlock, _srcChainId, chainId, false);
+        addBridgeLock(_id, _srcCoin, _sender, _receiver, _amount, _hashlock, _srcChainId, chainId);
 
         emit ReleaseAdded(_id);
     }
@@ -181,6 +188,8 @@ contract ERC20Bridge is BridgeLocker {
     {
         address dstCoin = getDstCoinByBridgelockId(_id);
         
+        deactivateBridgeLock(_id, _preimage);
+
         if(!ERC20(dstCoin).transfer(msg.sender, getBridgeLockAmount(_id))) {
             revert("transfer failed");
         }
@@ -197,6 +206,8 @@ contract ERC20Bridge is BridgeLocker {
     {
         address dstCoin = getDstCoinByBridgelockId(_id);
         
+        deactivateBridgeLock(_id, _preimage);
+
         if(!MintableERC20(dstCoin).mint(msg.sender, getBridgeLockAmount(_id))){
             revert("mint failed");
         }
@@ -210,6 +221,14 @@ contract ERC20Bridge is BridgeLocker {
         returns (bool) 
     {
            return coinMap[_srcCoin] != address(0);
+    }
+
+    function isCoinOriginal(address _coin) 
+        external
+        view
+        returns (bool)
+    {
+        return origCoins[_coin];   
     }
 
     function getAvailableCoins() 
