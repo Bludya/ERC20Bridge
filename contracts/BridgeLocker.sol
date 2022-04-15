@@ -110,7 +110,7 @@ contract BridgeLocker is Ownable {
     }
 
     function getBridgeLockSrcCoin(bytes32 _id)
-        internal
+        public
         view
         returns (address) 
     {
