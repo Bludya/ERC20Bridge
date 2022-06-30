@@ -1,4 +1,6 @@
 # ERC20Bridge
+This is a solution to a Blockchain academy project.
+
 ## Dictionary
 **bridging** - as a noun - A single `to-from` transition of a coin.That means that if a bridged coin is being bridged back to its original network, this is another **bridging**.
 
